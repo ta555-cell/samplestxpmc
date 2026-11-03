@@ -1,0 +1,16 @@
+{
+  "name": "testingofsamplestx",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "scripts": {
+  "build": "javascript-obfuscator src/app.js --output app.js --compact true --control-flow-flattening true --dead-code-injection true"
+},
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "javascript-obfuscator": "^5.9.1"
+  }
+}
