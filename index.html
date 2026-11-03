@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SampleStoreX - Laboratory Sample & Rack Management System</title>
+
+    <!-- DYNAMIC SECURE CONFIGURATION LOADER -->
+    <script>
+        window.CLIENT_FIREBASE_CONFIG = {};
+
+        async function loadSecureConfig() {
+            try {
+                const response = await fetch('/.netlify/functions/labapi');
+                const data = await response.json();
+                if (data.status === 'success') {
+                    window.CLIENT_FIREBASE_CONFIG = data.config;
+                    console.log("Secure credentials successfully retrieved from Netlify Function.");
+                }
+            } catch (error) {
+                console.error("Failed to load serverless config:", error);
+            }
+        }
+
+        // Initialize configuration retrieval on script load
+        loadSecureConfig();
+    </script>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0f172a',
+                        darkcard: '#1e293b',
+                        darkborder: '#334155',
+                        darkaccent: '#3b82f6'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- SheetJS (XLSX) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- jsPDF & html2canvas -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        
+        @keyframes blink-green-anim { 0%, 100% { background-color: #22c55e; color: #ffffff; } 50% { background-color: #15803d; color: #ffffff; } }
+        .blink-target { animation: blink-green-anim 0.8s infinite; border: 2px solid #ffffff; }
+
+        @keyframes blink-red-overdue { 0%, 100% { background-color: #7f1d1d; color: #ffffff; } 50% { background-color: #ef4444; color: #ffffff; } }
+        .row-overdue-blink { animation: blink-red-overdue 1s infinite; }
+
+        @keyframes blink-blue-retrieved-anim { 0%, 100% { background-color: #2563eb; color: #ffffff; } 50% { background-color: #1d4ed8; color: #ffffff; } }
+        .blink-blue-retrieved { animation: blink-blue-retrieved-anim 0.9s infinite; border: 1.5px solid #60a5fa; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
+</head>
+<body class="bg-darkbg text-slate-100 min-h-screen flex flex-col justify-between selection:bg-blue-600 selection:text-white">
+
+    <!-- LOGIN SCREEN -->
+    <div id="loginScreen" class="fixed inset-0 bg-slate-950 flex items-center justify-center z-50 p-4">
+        <div class="bg-darkcard rounded-2xl shadow-2xl max-w-md w-full p-8 border border-darkborder">
+            <div class="text-center mb-6">
+                <div class="w-20 h-20 bg-blue-600 rounded-2xl mx-auto flex items-center justify-center shadow-lg text-white text-3xl font-bold mb-3">
+                    <i class="fa-solid fa-vials"></i>
+                </div>
+                <h1 class="text-2xl font-bold text-white tracking-wide">SampleStoreX</h1>
+                <p class="text-xs text-slate-400 mt-1">Laboratory Sample Storage System v6.2</p>
+            </div>
+            <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Username / Email</label>
+                    <input type="text" id="loginUser" required class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-darkborder text-white focus:ring-2 focus:ring-blue-500 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">Password</label>
+                    <div class="relative">
+                        <input type="password" id="loginPass" required class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-darkborder text-white focus:ring-2 focus:ring-blue-500 text-sm pr-10">
+                        <button type="button" onclick="togglePasswordVisibility('loginPass', this)" class="absolute right-3 top-3.5 text-slate-400 hover:text-white text-sm"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg shadow-lg transition text-sm">
+                    <i class="fa-solid fa-right-to-bracket mr-2"></i> Secure Login
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MAIN DASHBOARD -->
+    <div id="dashboardApp" class="hidden flex-1 flex flex-col">
+        <!-- HEADER WITH LAB BRANDING -->
+        <header class="bg-slate-900 border-b border-darkborder sticky top-0 z-40 shadow-lg">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                <div class="flex items-center space-x-4">
+                    <button onclick="checkAdminAccessAndToggle()" id="adminPanelBtn" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-200 border border-darkborder px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center">
+                        <i class="fa-solid fa-sliders mr-1.5 text-blue-400"></i> Admin Panel
+                    </button>
+                    <div class="flex items-center space-x-3">
+                        <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-lg text-white shadow">
+                            <i class="fa-solid fa-vials"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-lg tracking-wide text-white" id="headerLabName">SampleStoreX Lab</span>
+                                <span class="text-xs bg-slate-800 border border-slate-700 px-2.5 py-0.5 rounded-full text-blue-400" id="headerBranchBadge">Main Branch</span>
+                            </div>
+                            <p class="text-[10px] text-slate-400" id="headerLabContact">Contact: +92 300 1234567 | Address: Diagnostic Tower</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="text-right text-xs">
+                        <p class="font-semibold text-white" id="loggedUserDisplay">User (Role)</p>
+                        <select id="userBranchSelector" onchange="switchBranchFromHeader(this.value)" class="mt-0.5 bg-slate-800 border border-slate-700 text-xs text-blue-400 rounded px-1.5 py-0.5 font-semibold focus:outline-none cursor-pointer"></select>
+                    </div>
+                    <button onclick="handleLogout()" class="bg-red-600/20 hover:bg-red-600/40 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center">
+                        <i class="fa-solid fa-power-off mr-1.5"></i> Logout
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- DASHBOARD BODY -->
+        <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full space-y-6">
+
+            <!-- ADMIN PANEL SECTION -->
+            <section id="adminPanelSection" class="hidden bg-darkcard rounded-xl shadow-xl border border-darkborder p-6">
+                <div class="flex justify-between items-center border-b border-darkborder pb-4 mb-6">
+                    <h2 class="text-xl font-bold text-white flex items-center">
+                        <i class="fa-solid fa-user-shield text-blue-500 mr-2"></i> System Administration & Controls
+                    </h2>
+                    <button onclick="toggleAdminPanel()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                    <!-- Nav Tabs -->
+                    <div class="space-y-1 bg-slate-900 p-3 rounded-xl border border-darkborder text-xs">
+                        <button onclick="switchAdminTab('usersTab', this)" id="adm_nav_users" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden bg-blue-600 text-white transition"><i class="fa-solid fa-users mr-2"></i> Users Management</button>
+                        <button onclick="switchAdminTab('rolesTab', this)" id="adm_nav_roles" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-user-lock mr-2"></i> Role & Permission</button>
+                        <button onclick="switchAdminTab('labBranchTab', this)" id="adm_nav_labBranch" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-hospital mr-2"></i> Lab & Branch Management</button>
+                        <button onclick="switchAdminTab('deptColorsTab', this)" id="adm_nav_deptColors" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-palette mr-2"></i> Department Management</button>
+                        <button onclick="switchAdminTab('manageRacksTab', this)" id="adm_nav_manageRacks" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-boxes-stacked mr-2"></i> Manage Racks</button>
+                        <button onclick="switchAdminTab('discardAlertsTab', this)" id="adm_nav_discardAlerts" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-bell mr-2"></i> Rack Discard Setting</button>
+                        <button onclick="switchAdminTab('hostingConfigTab', this)" id="adm_nav_hostingConfig" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-cloud mr-2"></i> Hosting Config</button>
+                        <button onclick="switchAdminTab('printerTab', this)" id="adm_nav_printer" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-print mr-2"></i> Sticker Printer Setup</button>
+                        <button onclick="switchAdminTab('gridDisplayTab', this)" id="adm_nav_gridDisplay" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-table-cells mr-2"></i> Global Grid Customization</button>
+                        <button onclick="switchAdminTab('dataBackupTab', this)" id="adm_nav_dataBackup" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-slate-300 hover:bg-slate-800 transition"><i class="fa-solid fa-database mr-2"></i> Advanced Import / Export Data</button>
+                        <button onclick="switchAdminTab('deleteDataTab', this)" id="adm_nav_deleteData" class="admin-tab-btn w-full text-left px-3 py-2 rounded-lg font-medium hidden text-red-400 hover:bg-red-900/30 transition"><i class="fa-solid fa-trash-can mr-2"></i> Data Cleanup & Delete</button>
+                    </div>
+
+                    <!-- Work Area -->
+                    <div class="lg:col-span-3 space-y-6">
+                        <!-- 1. Users Tab -->
+                        <div id="usersTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-blue-400 text-xs uppercase" id="userFormTitle">Add New User</h3>
+                                <input type="hidden" id="editingUserIndex" value="-1">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                    <input type="text" id="newUsername" placeholder="Username" class="px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                    <div class="relative">
+                                        <input type="password" id="newPassword" placeholder="Password" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white pr-9">
+                                        <button type="button" onclick="togglePasswordVisibility('newPassword', this)" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white text-xs"><i class="fa-solid fa-eye"></i></button>
+                                    </div>
+                                    <select id="newUserRole" class="px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white"></select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-300 mb-1">Assign Branches:</label>
+                                    <div id="userMultiBranchCheckboxes" class="flex flex-wrap gap-3 text-xs bg-slate-800 p-2.5 rounded border border-darkborder"></div>
+                                </div>
+                                <div class="flex space-x-2">
+                                    <button onclick="saveUserAccount()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Save User</button>
+                                    <button onclick="resetUserForm()" class="bg-slate-700 text-slate-300 px-3 py-2 rounded text-xs">Cancel / Reset</button>
+                                </div>
+                            </div>
+                            <table class="w-full text-left border-collapse text-xs"><thead class="bg-slate-900 text-slate-400 border-b border-darkborder"><tr><th class="p-3">User</th><th class="p-3">Password</th><th class="p-3">Role</th><th class="p-3">Branches</th><th class="p-3">Actions</th></tr></thead><tbody id="usersTableBody" class="divide-y divide-darkborder"></tbody></table>
+                        </div>
+
+                        <!-- 2. Role & Permission Matrix -->
+                        <div id="rolesTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-amber-400 text-xs uppercase">Role & Permission Matrix</h3>
+                                <div class="flex gap-2">
+                                    <input type="text" id="newRoleNameInput" placeholder="New Role Name (e.g. Supervisor)" class="flex-1 px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                    <button onclick="addNewRole()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-semibold">Add Role</button>
+                                </div>
+                                <div id="rolesListContainer" class="space-y-4 pt-2"></div>
+                            </div>
+                        </div>
+
+                        <!-- 3. Lab & Branch Management -->
+                        <div id="labBranchTab" class="admin-tab-content hidden space-y-6">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-emerald-400 text-xs uppercase">Branches Management</h3>
+                                <div class="flex gap-2">
+                                    <input type="text" id="newBranchNameInput" placeholder="Branch Name" class="flex-1 px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                    <button onclick="addNewBranch()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs font-semibold">Add Branch</button>
+                                </div>
+                                <div id="branchesListContainer" class="space-y-2 pt-2"></div>
+                            </div>
+
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-blue-400 text-xs uppercase">Branch Lab Information & Branding</h3>
+                                <select id="labInfoBranchSelect" onchange="loadLabInfoForBranch()" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white"></select>
+                                <input type="text" id="labNameInput" placeholder="Lab Name" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                <input type="text" id="labContactInput" placeholder="Contact" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                <textarea id="labAddressInput" rows="2" placeholder="Address" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white"></textarea>
+                                <button onclick="saveLabInfoForBranch()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Save Lab Info</button>
+                            </div>
+                        </div>
+
+                        <!-- 4. Department Management -->
+                        <div id="deptColorsTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-purple-400 text-xs uppercase">Department Management</h3>
+                                <input type="hidden" id="editingDeptIndex" value="-1">
+                                <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+                                    <input type="text" id="newDeptId" placeholder="ID (e.g. C)" class="px-2 py-1.5 bg-slate-800 border border-darkborder text-xs rounded uppercase text-white">
+                                    <input type="text" id="newDeptName" placeholder="Name" class="px-2 py-1.5 bg-slate-800 border border-darkborder text-xs rounded text-white">
+                                    <input type="color" id="newDeptColor" value="#FFD700" class="h-8 w-full rounded bg-slate-800 border border-darkborder cursor-pointer">
+                                    <button onclick="saveDeptRule()" class="bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-semibold">Save / Update Dept</button>
+                                </div>
+                                <div id="deptListContainer" class="space-y-2 pt-2"></div>
+                            </div>
+                        </div>
+
+                        <!-- 5. Manage Racks -->
+                        <div id="manageRacksTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-amber-400 text-xs uppercase">Manage Racks (Capacity, Life & Date Format Prefix)</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-4 gap-2 text-xs">
+                                    <div>
+                                        <label class="text-[10px] text-slate-400">Rack ID Date Prefix Format</label>
+                                        <select id="rackDateFormatSelect" class="w-full px-2 py-1.5 bg-slate-800 border border-darkborder rounded text-white">
+                                            <option value="DD-MM-YY">DD-MM-YY (e.g., C-29-10-26-01)</option>
+                                            <option value="DD-MM">DD-MM (e.g., C-29-10-01)</option>
+                                            <option value="YY-MM-DD">YY-MM-DD (e.g., C-26-10-29-01)</option>
+                                        </select>
+                                    </div>
+                                    <div><label class="text-[10px] text-slate-400">Rack Type ID</label><input type="text" id="rackMgrId" placeholder="e.g. C" class="w-full px-2 py-1.5 bg-slate-800 border border-darkborder rounded text-white uppercase"></div>
+                                    <div><label class="text-[10px] text-slate-400">Capacity</label><input type="number" id="rackMgrCap" placeholder="e.g. 100" class="w-full px-2 py-1.5 bg-slate-800 border border-darkborder rounded text-white"></div>
+                                    <div><label class="text-[10px] text-slate-400">Storage Life (Days)</label><input type="number" id="rackMgrLife" placeholder="e.g. 7" class="w-full px-2 py-1.5 bg-slate-800 border border-darkborder rounded text-white"></div>
+                                </div>
+                                <button onclick="saveRackManagerConfig()" class="bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded text-xs font-semibold">Save / Update Rack Rule</button>
+                                <div id="manageRacksListContainer" class="space-y-2 pt-2"></div>
+                            </div>
+                        </div>
+
+                        <!-- 6. Rack Discard Setting -->
+                        <div id="discardAlertsTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-4">
+                                <h3 class="font-bold text-red-400 text-xs uppercase">Rack Discard Setting & Auto-Delete</h3>
+                                <div class="p-3 bg-slate-800 rounded border border-darkborder space-y-2 text-xs">
+                                    <p class="font-bold text-amber-300">Discarded Racks Auto-Delete Setting</p>
+                                    <div>
+                                        <label class="text-[10px] text-slate-400">Auto Delete After (Days) [0 = Disabled]</label>
+                                        <input type="number" id="discardedAutoDeleteDays" value="30" class="w-full px-2 py-1 bg-slate-900 border border-darkborder rounded text-white">
+                                    </div>
+                                    <button onclick="saveDiscardedAutoDeleteConfig()" class="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded text-[10px] font-semibold"><i class="fa-solid fa-floppy-disk mr-1"></i> Save Auto-Delete Setting</button>
+                                </div>
+                                <div id="perDeptDiscardContainer" class="space-y-3"></div>
+                            </div>
+                        </div>
+
+                        <!-- 7. Hosting Config -->
+                        <div id="hostingConfigTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-emerald-400 text-xs uppercase">Hosting & Realtime Sync Config</h3>
+                                <div>
+                                    <label class="block text-xs text-slate-300 mb-1 font-semibold">Operation Mode:</label>
+                                    <select id="hostingModeSelect" onchange="toggleHostingModeUI()" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                        <option value="OFFLINE">OFFLINE MODE (Local Device Storage)</option>
+                                        <option value="LIVE" selected>LIVE MODE (Cloud Connection)</option>
+                                    </select>
+                                </div>
+                                <div id="liveModeOptionsContainer" class="space-y-3 pt-2 border-t border-darkborder">
+                                    <label class="block text-xs text-slate-300 mb-1 font-semibold">Live Connection Type:</label>
+                                    <select id="liveBackendSelect" onchange="toggleBackendFields()" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-xs text-white">
+                                        <option value="FIREBASE" selected>Firebase Web SDK Credentials</option>
+                                        <option value="CLIENT_SERVER">Client-Server Custom API Endpoint</option>
+                                    </select>
+                                </div>
+                                <div id="firebaseCredentialsBox" class="space-y-2 pt-2">
+                                    <p class="text-[11px] text-amber-400 font-semibold">// Firebase Configuration Parameters</p>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                                        <div><label class="text-[10px] text-slate-400">apiKey</label><input type="text" id="fb_apiKey" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div><label class="text-[10px] text-slate-400">authDomain</label><input type="text" id="fb_authDomain" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div><label class="text-[10px] text-slate-400">projectId</label><input type="text" id="fb_projectId" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div><label class="text-[10px] text-slate-400">storageBucket</label><input type="text" id="fb_storageBucket" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div><label class="text-[10px] text-slate-400">messagingSenderId</label><input type="text" id="fb_messagingSenderId" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div><label class="text-[10px] text-slate-400">appId</label><input type="text" id="fb_appId" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></div>
+                                        <div class="md:col-span-2"><label class="text-[10px] text-emerald-400 font-bold">Database URL (Include https://)</label><input type="text" id="fb_databaseURL" class="w-full px-3 py-1.5 rounded bg-slate-800 border border-emerald-500/50 text-white font-mono"></div>
+                                    </div>
+                                </div>
+                                <button onclick="saveHostingConfig()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs font-semibold">Save Hosting Config</button>
+                            </div>
+                        </div>
+
+                        <!-- 8. Sticker Printer Setup -->
+                        <div id="printerTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-purple-400 text-xs uppercase">Sticker Printer Setup</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                    <div>
+                                        <label class="block text-slate-300 mb-1">Printer Model:</label>
+                                        <select id="printerSelect" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-white">
+                                            <option value="Zebra Barcode Printer">Zebra Barcode Printer</option>
+                                            <option value="Xprinter 365B Thermal">Xprinter 365B Thermal Printer</option>
+                                            <option value="TSC TTP-244 Label">TSC TTP-244 Label Printer</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-300 mb-1">Default Sticker Size:</label>
+                                        <select id="printerStickerSize" class="w-full px-3 py-2 rounded bg-slate-800 border border-darkborder text-white">
+                                            <option value="Small">Small (40x25mm)</option>
+                                            <option value="Medium" selected>Medium (50x25mm / 25x50mm)</option>
+                                            <option value="Large">Large (70x40mm)</option>
+                                        </select>
+                                    </div>
+                                    <div class="md:col-span-2 flex items-center space-x-2 pt-1">
+                                        <input type="checkbox" id="printerPreviewCheck" checked class="rounded bg-slate-800 border-darkborder">
+                                        <label class="text-slate-300 font-semibold">Preview Sticker before Printing</label>
+                                    </div>
+                                </div>
+                                <button onclick="showCustomAlert('Saved', 'Printer configuration saved.')" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded text-xs font-semibold">Save Printer</button>
+                            </div>
+                        </div>
+
+                        <!-- 9. Global Grid Customization -->
+                        <div id="gridDisplayTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-darkborder space-y-3">
+                                <h3 class="font-bold text-blue-400 text-xs uppercase">Global Grid Customization</h3>
+                                <div class="grid grid-cols-2 gap-3 text-xs pt-2">
+                                    <div><label class="text-slate-300">Column Width (px):</label><input type="number" id="gridColWidth" value="65" class="w-full px-2 py-1 bg-slate-800 border border-darkborder rounded text-white"></div>
+                                    <div><label class="text-slate-300">Row Height (px):</label><input type="number" id="gridRowHeight" value="42" class="w-full px-2 py-1 bg-slate-800 border border-darkborder rounded text-white"></div>
+                                    <div><label class="text-slate-300">Font Size (px):</label><input type="number" id="gridFontSizePx" value="12" class="w-full px-2 py-1 bg-slate-800 border border-darkborder rounded text-white"></div>
+                                    <div>
+                                        <label class="text-slate-300">Show Empty Pos No:</label>
+                                        <select id="showEmptyPosCheck" class="w-full px-2 py-1 bg-slate-800 border border-darkborder rounded text-white">
+                                            <option value="yes">Yes</option>
+                                            <option value="no">No</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button onclick="saveGlobalGridSettings()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Save & Set Default</button>
+                            </div>
+                        </div>
+
+                        <!-- 10. ADVANCED IMPORT / EXPORT DATA TAB -->
+                        <div id="dataBackupTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-5 rounded-xl border border-darkborder space-y-5">
+                                <div class="flex items-center justify-between border-b border-darkborder pb-3">
+                                    <h3 class="font-bold text-blue-400 text-xs uppercase"><i class="fa-solid fa-file-export mr-2"></i> Targeted Data Export & Backup</h3>
+                                    <select id="backupBranchSelect" class="px-3 py-1 rounded bg-slate-800 border border-darkborder text-xs text-white"></select>
+                                </div>
+                                
+                                <div class="space-y-2 text-xs bg-slate-800/80 p-3.5 rounded-lg border border-darkborder">
+                                    <p class="font-semibold text-slate-200 mb-1">Select Data Categories to Export:</p>
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-slate-300">
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="expChkSamples" checked class="rounded bg-slate-900 border-darkborder"> <span>Samples Data (Position, Status, etc)</span></label>
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="expChkRacks" checked class="rounded bg-slate-900 border-darkborder"> <span>Racks Data (Types, Discard Dates, etc)</span></label>
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="expChkAdmin" checked class="rounded bg-slate-900 border-darkborder"> <span>Admin / System Config (Users, Roles, Depts)</span></label>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-wrap gap-3">
+                                    <button onclick="exportDataExcelAdvanced()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded text-xs font-semibold shadow"><i class="fa-solid fa-file-excel mr-1.5"></i> Export Excel (.xlsx)</button>
+                                    <button onclick="exportDataJSONAdvanced()" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded text-xs font-semibold shadow"><i class="fa-solid fa-file-code mr-1.5"></i> Export JSON (.json)</button>
+                                </div>
+
+                                <hr class="border-darkborder my-4">
+
+                                <div class="space-y-3">
+                                    <h3 class="font-bold text-amber-400 text-xs uppercase"><i class="fa-solid fa-file-import mr-2"></i> Universal Data Import (Excel & JSON)</h3>
+                                    <p class="text-slate-400 text-xs">Import data seamlessly from newly exported backup files or legacy local storage sheets. Select target modules below:</p>
+                                    
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-slate-300 bg-slate-800/80 p-3.5 rounded-lg border border-darkborder">
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="impChkSamples" checked class="rounded bg-slate-900 border-darkborder"> <span>Import Samples Data</span></label>
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="impChkRacks" checked class="rounded bg-slate-900 border-darkborder"> <span>Import Racks Data</span></label>
+                                        <label class="flex items-center space-x-2"><input type="checkbox" id="impChkAdmin" class="rounded bg-slate-900 border-darkborder"> <span>Import Admin / System Config</span></label>
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-3 pt-2">
+                                        <label class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold cursor-pointer shadow flex items-center">
+                                            <i class="fa-solid fa-file-excel mr-1.5"></i> Import Excel File (.xlsx / .xls) <input type="file" id="importExcelFileInput" accept=".xlsx, .xls" onchange="importDataExcelAdvanced(event)" class="hidden">
+                                        </label>
+                                        <label class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded text-xs font-semibold cursor-pointer shadow flex items-center">
+                                            <i class="fa-solid fa-file-code mr-1.5"></i> Import JSON File (.json) <input type="file" id="importJsonFileInput" accept=".json" onchange="importDataJSONAdvanced(event)" class="hidden">
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 11. Data Cleanup -->
+                        <div id="deleteDataTab" class="admin-tab-content hidden space-y-4">
+                            <div class="bg-slate-900 p-4 rounded-xl border border-red-500/30 space-y-4">
+                                <div class="flex items-center justify-between border-b border-darkborder pb-2">
+                                    <h3 class="font-bold text-red-400 text-xs uppercase">Select Target Branch for Cleanup</h3>
+                                    <select id="cleanupBranchSelect" class="px-3 py-1 rounded bg-slate-800 border border-darkborder text-xs text-white"></select>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                    <div class="p-3 bg-slate-800 rounded border border-darkborder space-y-2">
+                                        <p class="font-semibold text-xs text-slate-200">Delete Samples Only</p>
+                                        <button onclick="purgeSamplesData()" class="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/50 px-3 py-1.5 rounded text-xs font-semibold transition">Clear Samples</button>
+                                    </div>
+                                    <div class="p-3 bg-slate-800 rounded border border-darkborder space-y-2">
+                                        <p class="font-semibold text-xs text-slate-200">Delete All Racks</p>
+                                        <button onclick="purgeRacksData()" class="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white border border-red-500/50 px-3 py-1.5 rounded text-xs font-semibold transition">Clear Racks</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 1. ADD SAMPLE & STORAGE GRID SECTION -->
+            <section class="bg-darkcard rounded-xl shadow-xl border border-darkborder p-6 space-y-4">
+                <h2 class="text-lg font-bold text-white flex items-center">
+                    <i class="fa-solid fa-circle-plus text-emerald-500 mr-2"></i> Add Sample & Storage Grid
+                </h2>
+                
+                <div class="bg-slate-900 p-3 rounded-xl border border-darkborder flex flex-wrap items-center gap-3 text-xs">
+                    <button onclick="startNewRackPrompt()" id="btn_feat_startRack" class="bg-pink-600 hover:bg-pink-500 text-white px-3 py-2 rounded-lg font-semibold shadow flex items-center">
+                        <i class="fa-solid fa-layer-group mr-1.5"></i> Start New Rack
+                    </button>
+                    <div class="flex items-center space-x-1.5">
+                        <span class="text-slate-300 font-semibold uppercase">Dept:</span>
+                        <select id="storageTypeSelect" onchange="onStorageTypeChange()" class="px-2.5 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></select>
+                    </div>
+                    <div class="flex items-center space-x-1.5 flex-1 min-w-[200px]">
+                        <input type="text" id="sampleIdInput" placeholder="Scan / Enter Sample ID..." class="flex-1 px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-white" onkeydown="if(event.key==='Enter') addSampleToRack()">
+                        <button onclick="addSampleToRack()" id="btn_feat_addSample" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded font-semibold"><i class="fa-solid fa-plus mr-1"></i> Add</button>
+                    </div>
+                    <div class="flex items-center space-x-1.5">
+                        <span class="text-slate-300 font-semibold uppercase">Active Rack:</span>
+                        <select id="activeRackSelect" onchange="onActiveRackChange()" class="px-2.5 py-1.5 rounded bg-slate-800 border border-darkborder text-white"></select>
+                    </div>
+                    <div class="flex items-center space-x-2 border-l border-darkborder pl-3">
+                        <button onclick="generateRackSheetPDF()" id="btn_feat_pdfSheet" class="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 rounded font-medium"><i class="fa-solid fa-file-pdf mr-1"></i> Sheet PDF</button>
+                        <button onclick="exportCurrentGridPDF()" id="btn_feat_exportPdf" class="bg-rose-600 hover:bg-rose-500 text-white px-2.5 py-1.5 rounded font-medium"><i class="fa-solid fa-download mr-1"></i> Export PDF</button>
+                        <button onclick="triggerStickerPrintAction()" id="btn_feat_sticker" class="bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1.5 rounded font-medium"><i class="fa-solid fa-barcode mr-1"></i> Sticker</button>
+                        <button onclick="endStorageCurrentRack()" id="btn_feat_endStorage" class="bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-1.5 rounded font-medium"><i class="fa-solid fa-lock mr-1"></i> End Storage</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                    <div class="lg:col-span-3 bg-slate-900 border border-darkborder rounded-xl p-4 flex flex-col justify-between">
+                        <div class="flex justify-between items-center mb-3 border-b border-darkborder pb-2">
+                            <span class="text-xs font-bold text-slate-200" id="currentRackLabel">No Active Rack Selected</span>
+                            <span class="text-[10px] bg-blue-900/60 border border-blue-500/30 text-blue-300 px-2.5 py-0.5 rounded-full font-semibold" id="rackCapacityBadge">Capacity: 0/0</span>
+                        </div>
+                        <div id="liveRackGridContainer" class="overflow-x-auto flex-1 flex items-center justify-center p-2 min-h-[360px]">
+                            <p class="text-slate-500 text-xs">Select Dept & Rack to preview grid.</p>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-1 bg-slate-900 border border-darkborder rounded-xl p-4 flex flex-col">
+                        <div class="flex justify-between items-center mb-2 border-b border-darkborder pb-2">
+                            <div class="flex items-center space-x-1.5">
+                                <input type="checkbox" id="selectAllActiveSamples" onchange="toggleSelectAllActiveSamples(this)" class="rounded bg-slate-800 border-darkborder">
+                                <span class="text-xs font-bold text-slate-300">Select All</span>
+                            </div>
+                            <button onclick="deleteSelectedActiveSamples()" class="bg-red-600/30 hover:bg-red-600/60 text-red-300 border border-red-500/30 px-2 py-0.5 rounded text-[10px] font-semibold"><i class="fa-solid fa-trash mr-1"></i> Delete</button>
+                        </div>
+                        <div class="overflow-y-auto flex-1 max-h-80 space-y-1.5" id="liveRackSampleList">
+                            <p class="text-slate-500 text-xs text-center py-4">No samples in active rack.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. ADVANCED SEARCH & RETRIEVAL SECTION -->
+            <section class="bg-darkcard rounded-xl shadow-xl border border-darkborder p-6 space-y-4">
+                <h2 class="text-lg font-bold text-white flex items-center">
+                    <i class="fa-solid fa-magnifying-glass text-blue-500 mr-2"></i> Advanced Search & Retrieval
+                </h2>
+                <div class="flex flex-wrap items-center gap-3 bg-slate-900 p-2.5 rounded-xl border border-darkborder">
+                    <input type="text" id="searchSampleInput" placeholder="Enter Exact Sample ID..." class="px-3 py-1.5 rounded bg-slate-800 border border-darkborder text-xs text-white w-48" onkeydown="if(event.key==='Enter') executeSampleSearch()">
+                    <button onclick="executeSampleSearch()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-semibold"><i class="fa-solid fa-search mr-1"></i> Search</button>
+                    <button onclick="toggleSearchGridVisibility()" id="btnToggleSearchGrid" class="hidden bg-slate-800 hover:bg-slate-700 text-slate-300 border border-darkborder px-3 py-1.5 rounded text-xs font-semibold">
+                        <i class="fa-solid fa-eye mr-1"></i> Show / Hide Rack Grid
+                    </button>
+                </div>
+
+                <div id="searchSingleLineSummary" class="hidden bg-slate-900 p-3 rounded-xl border border-darkborder"></div>
+                <div id="searchResultsGridContainer" class="hidden bg-slate-900 p-4 rounded-xl border border-darkborder flex flex-col justify-center items-center"></div>
+            </section>
+
+            <!-- 3. SAMPLE INVENTORY SECTION -->
+            <section class="bg-darkcard rounded-xl shadow-xl border border-darkborder p-6">
+                <div class="flex flex-wrap justify-between items-center mb-4 gap-3">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-lg font-bold text-white flex items-center">
+                            <i class="fa-solid fa-list-check text-purple-500 mr-2"></i> Sample Inventory List
+                        </h2>
+                        <button onclick="toggleSectionCollapse('sampleInventoryContentBody')" class="text-xs bg-slate-800 hover:bg-slate-700 border border-darkborder px-2.5 py-1 rounded text-slate-300">
+                            <i class="fa-solid fa-eye mr-1"></i> Show / Hide
+                        </button>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <select id="sampleStatusFilter" onchange="renderSampleList()" class="px-2.5 py-1.5 rounded bg-slate-900 border border-darkborder text-xs text-white">
+                            <option value="All">All Statuses</option>
+                            <option value="Active">Active</option>
+                            <option value="Stored">Stored</option>
+                            <option value="Discarded">Discarded</option>
+                            <option value="Retrieved">Retrieved</option>
+                        </select>
+                        <button onclick="exportDataExcelAdvanced()" class="bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-1.5 rounded text-xs"><i class="fa-solid fa-file-excel mr-1"></i> Excel</button>
+                        <button onclick="exportSamplesPDF()" class="bg-rose-600/20 text-rose-300 border border-rose-500/30 px-2.5 py-1.5 rounded text-xs"><i class="fa-solid fa-file-pdf mr-1"></i> PDF</button>
+                        <button onclick="deleteSelectedSamples()" class="bg-red-600/20 text-red-300 border border-red-500/30 px-2.5 py-1.5 rounded text-xs font-medium"><i class="fa-solid fa-trash mr-1"></i> Delete Selected</button>
+                    </div>
+                </div>
+
+                <div id="sampleInventoryContentBody" class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                    <div class="lg:col-span-2 overflow-x-auto max-h-96">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="bg-slate-900 text-slate-400 border-b border-darkborder sticky top-0">
+                                    <th class="p-2.5"><input type="checkbox" id="selectAllSamples" onchange="toggleSelectAllSamples(this)" class="rounded bg-slate-800 border-darkborder"></th>
+                                    <th class="p-2.5">Sample ID</th>
+                                    <th class="p-2.5">Position</th>
+                                    <th class="p-2.5">Rack No / Dept</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sampleListTableBody" class="divide-y divide-darkborder"></tbody>
+                        </table>
+                    </div>
+                    <div class="lg:col-span-3 bg-slate-900 border border-darkborder rounded-xl p-4 flex flex-col justify-center items-center" id="inventorySideRackPreview">
+                        <p class="text-slate-500 text-xs">Click on any sample row to preview its rack grid.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 4. RACK INVENTORY & HISTORY SECTION -->
+            <section class="bg-darkcard rounded-xl shadow-xl border border-darkborder p-6 space-y-4">
+                <div class="flex flex-wrap justify-between items-center gap-3 border-b border-darkborder pb-3">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-lg font-bold text-white flex items-center">
+                            <i class="fa-solid fa-boxes-stacked text-amber-500 mr-2"></i> Rack Inventory & History
+                        </h2>
+                        <button onclick="toggleSectionCollapse('rackInventoryContent')" class="text-xs bg-slate-800 hover:bg-slate-700 border border-darkborder px-2.5 py-1 rounded text-slate-300">
+                            <i class="fa-solid fa-eye mr-1"></i> Show / Hide
+                        </button>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label class="flex items-center space-x-1 text-xs text-slate-300"><input type="checkbox" onchange="toggleSelectAllRacks(this)" class="rounded bg-slate-900 border-darkborder"> <span>Select All</span></label>
+                        <select id="rackStatusFilter" onchange="renderRackList()" class="px-2.5 py-1.5 rounded bg-slate-900 border border-darkborder text-xs text-white">
+                            <option value="All">All Statuses</option>
+                            <option value="Active">Active</option>
+                            <option value="Stored">Stored</option>
+                        </select>
+                        <button onclick="bulkDiscardRacks()" class="bg-amber-600/30 text-amber-300 border border-amber-500/30 px-2.5 py-1.5 rounded text-xs font-semibold"><i class="fa-solid fa-box-archive mr-1"></i> Discard Selected</button>
+                        <button onclick="bulkDeleteRacks()" class="bg-red-600/20 text-red-300 border border-red-500/30 px-2.5 py-1.5 rounded text-xs"><i class="fa-solid fa-trash mr-1"></i> Delete Selected</button>
+                    </div>
+                </div>
+                <div id="rackInventoryContent" class="hidden space-y-3"></div>
+            </section>
+
+            <!-- 5. DISCARDED RACKS HISTORY SECTION -->
+            <section class="bg-darkcard rounded-xl shadow-xl border border-darkborder p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-darkborder pb-3">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-lg font-bold text-red-400 flex items-center">
+                            <i class="fa-solid fa-trash-arrow-up text-red-500 mr-2"></i> Discarded Racks History
+                        </h2>
+                        <button onclick="toggleSectionCollapse('discardedRacksContent')" class="text-xs bg-slate-800 hover:bg-slate-700 border border-darkborder px-2.5 py-1 rounded text-slate-300">
+                            <i class="fa-solid fa-eye mr-1"></i> Show / Hide
+                        </button>
+                    </div>
+                </div>
+                <div id="discardedRacksContent" class="hidden overflow-x-auto"></div>
+            </section>
+        </main>
+
+        <footer class="bg-slate-900 border-t border-darkborder py-4 text-right px-6 text-xs text-slate-500">
+            SampleStoreX Dark Enterprise v6.2 (Multi-Browser Live Sync Engine)
+        </footer>
+    </div>
+
+    <!-- CUSTOM MODAL CONTAINER -->
+    <div id="customModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-darkcard rounded-xl shadow-2xl max-w-md w-full p-6 space-y-4 border border-darkborder">
+            <h3 id="modalTitle" class="text-lg font-bold text-white">Notification</h3>
+            <div id="modalBody" class="text-xs text-slate-300"></div>
+            <div id="modalFooter" class="flex justify-end space-x-2 pt-2"></div>
+        </div>
+    </div>
+
+    <!-- ADMIN PANEL PASSWORD PROMPT MODAL -->
+    <div id="adminPasswordModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-darkcard rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4 border border-darkborder">
+            <h3 class="text-lg font-bold text-white flex items-center"><i class="fa-solid fa-lock text-amber-400 mr-2"></i> Admin Panel Security</h3>
+            <p class="text-xs text-slate-300">Enter Super Admin Password for <b id="adminModalBranchName"></b>:</p>
+            <div class="relative">
+                <input type="password" id="adminSecurityPassInput" placeholder="Password..." class="w-full px-3 py-2 rounded bg-slate-900 border border-darkborder text-xs text-white pr-9">
+                <button type="button" onclick="togglePasswordVisibility('adminSecurityPassInput', this)" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-white text-xs"><i class="fa-solid fa-eye"></i></button>
+            </div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="closeAdminPasswordModal()" class="bg-slate-800 text-slate-300 px-3 py-1.5 rounded text-xs">Cancel</button>
+                <button onclick="verifyAndOpenAdminPanel()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-semibold">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STICKER PREVIEW MODAL -->
+    <div id="stickerPreviewModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-darkcard rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4 border border-darkborder text-center">
+            <h3 class="text-lg font-bold text-white"><i class="fa-solid fa-barcode text-purple-400 mr-2"></i> Sticker Preview (25mm x 50mm)</h3>
+            <div id="stickerPreviewBox" class="bg-white text-slate-950 p-4 rounded-lg font-mono text-xs shadow-inner space-y-2 inline-block w-full"></div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="document.getElementById('stickerPreviewModal').classList.add('hidden')" class="bg-slate-800 text-slate-300 px-3 py-1.5 rounded text-xs">Cancel</button>
+                <button onclick="confirmPrintSticker()" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-1.5 rounded text-xs font-semibold"><i class="fa-solid fa-print mr-1"></i> Print Now</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE MODULE SETUP & MASTER REALTIME SYNC -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        window.initializeFirebaseApp = function(configData) {
+            if (!configData || !configData.apiKey) {
+                console.warn("Waiting for valid Firebase configuration...");
+                return;
+            }
+
+            try {
+                const app = initializeApp(configData);
+                const databaseInstance = getDatabase(app);
+
+                window.firebaseDB = databaseInstance;
+                window.firebaseRef = ref;
+                window.firebaseSet = set;
+
+                window.syncDataToCloud = function() {
+                    let hostingMode = localStorage.getItem('ssx_hosting_mode') || 'LIVE';
+                    if (hostingMode === 'OFFLINE') return;
+
+                    if (window.firebaseDB) {
+                        const racksData = JSON.parse(localStorage.getItem('ssx_racks') || '[]');
+                        const samplesData = JSON.parse(localStorage.getItem('ssx_samples') || '[]');
+                        
+                        set(ref(databaseInstance, 'appData/racks'), racksData);
+                        set(ref(databaseInstance, 'appData/samples'), samplesData);
+                    }
+                };
+
+                window.syncSystemConfigToCloud = function() {
+                    let hostingMode = localStorage.getItem('ssx_hosting_mode') || 'LIVE';
+                    if (hostingMode === 'OFFLINE') return;
+
+                    if (window.firebaseDB) {
+                        const configData = {
+                            users: JSON.parse(localStorage.getItem('ssx_users_list') || '[]'),
+                            roles: JSON.parse(localStorage.getItem('ssx_roles_list') || '[]'),
+                            branches: JSON.parse(localStorage.getItem('ssx_branches_list') || '[]'),
+                            departments: JSON.parse(localStorage.getItem('ssx_departments') || '[]'),
+                            labInfo: JSON.parse(localStorage.getItem('ssx_lab_info_store') || '{}'),
+                            passwords: JSON.parse(localStorage.getItem('ssx_admin_passwords') || '{}')
+                        };
+                        set(ref(databaseInstance, 'appData/systemConfig'), configData);
+                    }
+                };
+
+                onValue(ref(databaseInstance, 'appData/racks'), (snapshot) => {
+                    let hostingMode = localStorage.getItem('ssx_hosting_mode') || 'LIVE';
+                    if (hostingMode === 'OFFLINE') return;
+
+                    const data = snapshot.val();
+                    if (data !== null) {
+                        localStorage.setItem('ssx_racks', JSON.stringify(data));
+                        if (typeof window.refreshAllUIViews === 'function') window.refreshAllUIViews();
+                    } else {
+                        window.syncDataToCloud();
+                    }
+                });
+
+                onValue(ref(databaseInstance, 'appData/samples'), (snapshot) => {
+                    let hostingMode = localStorage.getItem('ssx_hosting_mode') || 'LIVE';
+                    if (hostingMode === 'OFFLINE') return;
+
+                    const data = snapshot.val();
+                    if (data !== null) {
+                        localStorage.setItem('ssx_samples', JSON.stringify(data));
+                        if (typeof window.refreshAllUIViews === 'function') window.refreshAllUIViews();
+                    } else {
+                        window.syncDataToCloud();
+                    }
+                });
+
+                onValue(ref(databaseInstance, 'appData/systemConfig'), (snapshot) => {
+                    let hostingMode = localStorage.getItem('ssx_hosting_mode') || 'LIVE';
+                    if (hostingMode === 'OFFLINE') return;
+
+                    const data = snapshot.val();
+                    if (data !== null) {
+                        if (data.users) { localStorage.setItem('ssx_users_list', JSON.stringify(data.users)); window.usersList = data.users; }
+                        if (data.roles) { localStorage.setItem('ssx_roles_list', JSON.stringify(data.roles)); window.rolesList = data.roles; }
+                        if (data.branches) { localStorage.setItem('ssx_branches_list', JSON.stringify(data.branches)); window.branchesList = data.branches; }
+                        if (data.departments) { localStorage.setItem('ssx_departments', JSON.stringify(data.departments)); window.departments = data.departments; }
+                        if (data.labInfo) {
+                            localStorage.setItem('ssx_lab_info_store', JSON.stringify(data.labInfo));
+                            Object.keys(data.labInfo).forEach(b => {
+                                localStorage.setItem(`ssx_lab_name_${b}`, data.labInfo[b].name || '');
+                                localStorage.setItem(`ssx_lab_contact_${b}`, data.labInfo[b].contact || '');
+                                localStorage.setItem(`ssx_lab_address_${b}`, data.labInfo[b].address || '');
+                            });
+                        }
+                        if (data.passwords) { localStorage.setItem('ssx_admin_passwords', JSON.stringify(data.passwords)); }
+                        if (typeof window.refreshAllUIViews === 'function') window.refreshAllUIViews();
+                    }
+                });
+
+                console.log("Firebase Master Realtime Sync Connected!");
+            } catch(err) {
+                console.warn("Firebase Sync Error:", err);
+            }
+        };
+
+        if (window.CLIENT_FIREBASE_CONFIG && window.CLIENT_FIREBASE_CONFIG.apiKey) {
+            window.initializeFirebaseApp(window.CLIENT_FIREBASE_CONFIG);
+        }
+    </script>
+
+    <!-- EXTERNAL APPLICATION SCRIPT (OR OBFUSCATED app.js) -->
+    <script src="app.js"></script>
+</body>
+</html>
