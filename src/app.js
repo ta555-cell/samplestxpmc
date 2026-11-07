@@ -80,6 +80,15 @@ let currentUser = null;
         }
 
         window.addEventListener('DOMContentLoaded', () => {
+            if (typeof firebase !== 'undefined' && firebase.auth) {
+                firebase.auth().signInAnonymously()
+                .then(() => {
+                   console.log("Firebase Anonymous Auth Connected Successfully!");
+                })
+                .catch((error) => {
+                   console.error("Firebase Auth Error:", error);
+                });
+    }
             loadBranchesDropdown();
             initDeptDropdowns();
             checkSessionPersistence();
@@ -518,10 +527,16 @@ let currentUser = null;
 
             branchesList.forEach((b, idx) => {
                 let curPass = passStore[b] || '';
+                // Prevent deleting default or single last branch if needed, or allow branch deletion with confirmation
+                let deleteBranchBtn = branchesList.length > 1 ? `<button onclick="deleteBranchAccount(${idx})" class="bg-red-600/30 hover:bg-red-600 text-red-300 hover:text-white px-2.5 py-1 rounded text-[11px] font-semibold"><i class="fa-solid fa-trash mr-1"></i> Delete</button>` : '';
+
                 container.innerHTML += `<div class="p-3 bg-slate-800 rounded border border-darkborder space-y-2 text-xs">
                     <div class="flex justify-between items-center">
                         <input type="text" id="branch_input_${idx}" value="${b}" class="bg-slate-900 border border-darkborder px-2 py-1 rounded text-white font-semibold">
-                        <button onclick="updateBranchName(${idx})" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-[11px] font-semibold"><i class="fa-solid fa-floppy-disk mr-1"></i> Update Name</button>
+                        <div class="space-x-1.5">
+                            <button onclick="updateBranchName(${idx})" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-[11px] font-semibold"><i class="fa-solid fa-floppy-disk mr-1"></i> Update Name</button>
+                            ${deleteBranchBtn}
+                        </div>
                     </div>
                     <div class="flex items-center space-x-2 pt-1">
                         <span class="text-slate-400">Admin Password:</span>
@@ -532,6 +547,30 @@ let currentUser = null;
                         <button onclick="saveBranchAdminPassword('${b}', ${idx})" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-[11px] font-semibold">Save Password</button>
                     </div>
                 </div>`;
+            });
+        }
+
+        function deleteBranchAccount(idx) {
+            let branchName = branchesList[idx];
+            if (branchesList.length <= 1) {
+                showCustomAlert('Action Denied', 'At least one branch must remain.');
+                return;
+            }
+
+            showCustomConfirm('Delete Branch', `Permanently delete branch <b>${branchName}</b> and its associated settings?`, () => {
+                branchesList.splice(idx, 1);
+                localStorage.setItem('ssx_branches_list', JSON.stringify(branchesList));
+
+                // Clean up related local storage keys if needed
+                if (currentBranch === branchName) {
+                    currentBranch = branchesList[0];
+                }
+
+                if (typeof window.syncSystemConfigToCloud === 'function') { window.syncSystemConfigToCloud(); }
+                loadBranchesAdminList();
+                loadBranchesDropdown();
+                initDashboardAfterLogin();
+                showCustomAlert('Deleted', `Branch <b>${branchName}</b> deleted successfully.`);
             });
         }
 
@@ -1878,15 +1917,3 @@ let currentUser = null;
 
             pendingStickerRackId = null;
         }
-
-        async function testNetlifyFunction() {
-            try {
-                const response = await fetch('/.netlify/functions/labapi');
-                const data = await response.json();
-                console.log("Netlify Function Response:", data.message);
-            } catch (error) {
-                console.error("Error connecting to Netlify Function:", error);
-            }
-        }
-
-        testNetlifyFunction();
